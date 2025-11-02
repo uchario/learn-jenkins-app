@@ -31,6 +31,7 @@ pipeline {
                 sh '''
                     test -f build/index.html
                     echo "Test passed: build/index.html exists."
+                    npm test
                 '''
             }
         }
