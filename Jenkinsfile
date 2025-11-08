@@ -1,29 +1,24 @@
 pipeline {
-    agent none   // We’ll pick the right agent per-stage
-
-    environment {
-        // Makes npm cache survive between builds → 10× faster
-        NPM_CONFIG_CACHE = "${workspace}/.npm"
-    }
+    agent any
 
     stages {
+
         stage('Build') {
             agent {
                 docker {
                     image 'node:18-alpine'
-                    label 'docker'          // any node with Docker
                     reuseNode true
                 }
             }
             steps {
                 sh '''
+                    ls -la
                     node --version
                     npm --version
                     npm ci
                     npm run build
-                    ls -la build
+                    ls -la
                 '''
-                stash name: 'built', includes: 'build/**, package.json, package-lock.json'
             }
         }
 
@@ -33,13 +28,15 @@ pipeline {
                     agent {
                         docker {
                             image 'node:18-alpine'
-                            label 'docker'
                             reuseNode true
                         }
                     }
+
                     steps {
-                        unstash 'built'
-                        sh 'npm test'
+                        sh '''
+                            #test -f build/index.html
+                            npm test
+                        '''
                     }
                     post {
                         always {
@@ -52,32 +49,22 @@ pipeline {
                     agent {
                         docker {
                             image 'mcr.microsoft.com/playwright:v1.39.0-jammy'
-                            label 'docker'
                             reuseNode true
-                            args '-u root'   // needed for apt-get inside container
                         }
                     }
+
                     steps {
-                        unstash 'built'
                         sh '''
-                            npm install -g serve
-                            serve -s build &
-                            SERVE_PID=$!
+                            npm install serve
+                            node_modules/.bin/serve -s build &
                             sleep 10
-                            npx playwright test --reporter=html
-                            kill $SERVE_PID || true
+                            npx playwright test  --reporter=html
                         '''
                     }
+
                     post {
                         always {
-                            publishHTML(
-                                target: [
-                                    reportDir: 'playwright-report',
-                                    reportFiles: 'index.html',
-                                    reportName: 'Playwright E2E Report',
-                                    keepAll: true
-                                ]
-                            )
+                            publishHTML([allowMissing: false, alwaysLinkToLastBuild: false, keepAll: false, reportDir: 'playwright-report', reportFiles: 'index.html', reportName: 'Playwright HTML Report', reportTitles: '', useWrapperFileDirectly: true])
                         }
                     }
                 }
@@ -85,24 +72,16 @@ pipeline {
         }
 
         stage('Deploy') {
-            when { branch 'main' }
             agent {
                 docker {
                     image 'node:18-alpine'
-                    label 'docker'
                     reuseNode true
                 }
             }
-            environment {
-                NETLIFY_AUTH_TOKEN = credentials('netlify-token')
-                NETLIFY_SITE_ID    = credentials('netlify-site-id')
-            }
             steps {
-                unstash 'built'
                 sh '''
-                    npm install -g netlify-cli
-                    netlify --version
-                    netlify deploy --dir=build --prod --site $NETLIFY_SITE_ID
+                    npm install netlify-cli
+                    node_modules/.bin/netlify --version
                 '''
             }
         }
